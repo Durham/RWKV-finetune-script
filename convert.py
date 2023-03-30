@@ -16,7 +16,7 @@ dtext = ''
 q = 0
 basic_text=''
 for record in data:
-   print(q,end='\n')
+   print(q,end='\r')
    q =q +1
    if not 'instruction' in record:
       continue
@@ -44,7 +44,7 @@ for record in data:
 #with open('output_alpaca_cleaned.jsonl', 'w') as f:
 #    f.write(dtext)
 
-with open(output_txt_file,'w')
+with open(output_txt_file,'w') as f:
   f.write(basic_text)
 
 
