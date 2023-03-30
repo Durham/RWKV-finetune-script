@@ -2,7 +2,7 @@ This repository contains my code and quick instruction of how to fine-tune large
 RWKV (https://github.com/BlinkDL/RWKV-LM) models on your data, particularly on
 Alpaca and it's derivatives.
 
-This is quick and dirty solution, not very optimal in many aspects.
+This is quick and dirty solution, not very optimal in many aspects. Following information are my findings, it could be wrong, use on your own risk.
 
 # Instruction
 ## Prepare your data
@@ -21,7 +21,7 @@ input_file = 'alpaca_data_cleaned.json'
 output_txt_file = "alpaca_data_cleaned_for_training.txt"
 ```
 at the beginning of the script
-## Install RWKV and dependecies
+## Install RWKV and dependencies
 I assume that you have suitable computer with GPU and cuda drivers 11.7 installed. This readme does not cover CUDA driver installation.
 Clone this repository https://github.com/Blealtan/RWKV-LM-LoRA It is good for both LoRa and full fine-tuning
 Install pytorch 1.13.1+cu117 (see here https://pytorch.org/get-started/previous-versions/ for details, I use command belowm but you may want to use different command depending on your OS etc)
@@ -30,6 +30,35 @@ pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --e
 ```
 Install pytorch-lightning (use 1.9.x version, not 2.0! 2.0 does not work), and DeepSpeed=0.7.0 and other accelerate. I install these using pip.
 Replace RWKV-LM-LoRA/RWKV-v4neo/src/dataset.py with dataset.py in this repo. I made changes so text file can be directly loaded and pre-tokenized. This is not the best (or a very good) way to do this, but it does the job for small datasets well enough.
+## Running
+
+go to RWKV-LM-LoRA/RWKV-v4neo/ directory and run train.py
+
+Example arguments:
+```
+7B, full fine-tuning, all weights, needs 4 A100 80GB
+
+python3 train.py   --load_model <path_to_initial_check_point>   --proj_dir <path_where_checkpoints_will_be_saved>   --data_file ./alpaca_extended.txt(<your data>)   --data_type utf-8   --vocab_size 50277 --ctx_len 384 --epoch_steps 600 --epoch_count 30 --epoch_begin 0 --epoch_save 1 --micro_bsz 2 --n_layer 32 --n_embd 4096 --pre_ffn 0 --head_qk 0 --lr_init 2e-5 --lr_final 5e-7 --warmup_steps 0 --beta1 0.9 --beta2 0.999 --adam_eps 1e-8 --accelerator gpu --devices 4 --precision bf16 --strategy deepspeed_stage_2 --grad_cp 1
+
+14B (not tested!, I think that need 8 A100 to work)
+python3 train.py   --load_model <path_to_initial_check_point>   --proj_dir <path_where_checkpoints_will_be_saved>   --data_file ./alpaca_extended.txt(<your data>)   --data_type utf-8   --vocab_size 50277 --ctx_len 384 --epoch_steps 600 --epoch_count 30 --epoch_begin 0 --epoch_save 1 --micro_bsz 2 --n_layer 40 --n_embd 5120 --pre_ffn 0 --head_qk 0 --lr_init 2e-5 --lr_final 5e-7 --warmup_steps 0 --beta1 0.9 --beta2 0.999 --adam_eps 1e-8 --accelerator gpu --devices 8 --precision bf16 --strategy deepspeed_stage_2 --grad_cp 1
+```
+Try longer ctx_len and larger micro_bsz if you have enough combined GPU memory.
+
+You can try offloading to CPU if you have a lot of RAM - 
+```
+--strategy deepspeed_stage_2_offload
+```
+That will fit into one GPU
+
+For LoRa training, add LoRa arguments, see readme of https://github.com/Blealtan/RWKV-LM-LoRA for an example. With LoRa 14B can be fine-tuned with 1 A100 GPU without offloading to CPU. 
+
+### How to choose number of epochs
+Epoch should be one pass through your dataset in theory, but in practice, you will want to save checkpoints and log progress more often. So choose some good number of steps (I use 100 or 500) and do following:
+
+After starting, train.py will print number of tokens in your dataset. Divide that by (micro_bsz * ctx_len * epoch_steps) and you  will get number of epochs needed to pass through dataset once. Adjust numbers in this equation as you see fit.
+
+
 
 
 
