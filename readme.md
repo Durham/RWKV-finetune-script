@@ -1,12 +1,92 @@
-This repository contains my code and quick instruction of how to fine-tune large
-RWKV (https://github.com/BlinkDL/RWKV-LM) models on your data, particularly on
-Alpaca and it's derivatives.
+# Fine Tuning RWKV
+This repository contains code and instructions on how to fine tune
+[RWKV](https://github.com/BlinkDL/RWKV-LM) models on your data, particularly on
+Alpaca and its derivatives.
 
-This is quick and dirty solution, not very optimal in many aspects. Following information are my findings, it could be wrong, use on your own risk.
+This is a quick and dirty solution and not very optimal in many aspects. This guide will
+probably work on Ubuntu 22 operating systems. To my knowledge, it has not been tested on
+Windows, Mac OS, or other Linux operating systems. If you want to test it out on one of these systems, please report back/make a pull request with your results!
 
-# Instruction
+# Setup
+## Install CUDA drivers
+To speed up training, RWKV uses a CUDA kernel that is compiled just in time. In order for
+the kernel to be compiled, you need a CUDA toolkit and drivers for your GPU. Through (way too much) testing, we've figured out that the cuda drivers for 11.7 are compatible with everything else we're using.
+
+You can install the CUDA toolkit at https://developer.nvidia.com/cuda-11-7-0-download-archive.
+
+You can install drivers for your GPU through the driver manager on your operating system. (On Ubuntu, this can be found by typing "driver" in the application search bar.) According to [the official Nvidia documentation](https://docs.nvidia.com/deploy/cuda-compatibility/index.html#binary-compatibility__table-toolkit-driver), you need to install a driver version that is >=450.80.02*. I am using **nvidia-driver-470**. Alternatively, you can also install a driver using the command line as follows:
+
+1. Remove your old Nvidia driver:
+```
+sudo apt update
+sudo apt remove '^nvidia'
+sudo apt autoremove
+sudo apt-get purge 'nvidia*'
+sudo apt autoremove
+```
+2. Reboot your computer:
+```sh
+sudo reboot
+```
+3. Install the new Nvidia driver:
+```
+sudo apt install nvidia-driver-470
+```
+4. Reboot again:
+```
+sudo reboot
+```
+
+## Set up a Conda environment
+This is not strictly necessary, but highly recommended. Doing this will save you a lot of grief if something goes wrong in the installation process.
+
+First, install Miniconda at https://docs.conda.io/en/latest/miniconda.html.
+
+Next, create a new Conda enviornment:
+```
+conda create -n rwkv python=3.10
+```
+I recommend using Python 3.10 for your conda environment. This is what I am using, and it's the only version of Python I've tested the setup on.
+
+Finally, activate your Conda environment:
+```
+conda activate rwkv
+```
+Make sure your Conda environment is active for the rest of the steps.
+
+## Install RWKV and dependencies
+### Install RWKV
+Clone <https://github.com/Blealtan/RWKV-LM-LoRA>.
+```
+git clone git@github.com:Blealtan/RWKV-LM-LoRA.git
+```
+This uses [LoRA](https://arxiv.org/pdf/2106.09685.pdf) (small trainable weight matrices right before the attention mechanism) to fine tune the model, which has the advantage of (1) using less memory than fine tuning the model directly and (2) takes less memory to store the end result.
+
+Note: The above repository can also be used to fine tune the entire model (instead of just doing LoRA). If you're interested in this, look at the documentation/code in this repository.
+
+### Install the dependencies
+Install pytorch 1.13.1+cu117. (For details, see here https://pytorch.org/get-started/previous-versions/.)
+```
+pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
+```
+It's very important that you install *this particular* version of Pytorch. Later versions are not compatible with pytorch_lightning. This is also the version that works with the CUDA 11.7 toolkit you installed earlier.
+
+Next, install pytorch-lightning==1.9. MAKE SURE TO INSTALL THE 1.9.x VERSION OR EARLIER. The 2.0 version does not work! Also, install DeepSpeed==0.7.0.
+
+```
+pip install pytorch-lightning==1.9 deepspeed==0.7.0 
+```
+
+### (If you want to use the LLaMA Dataset)
+Replace `RWKV-LM-LoRA/RWKV-v4neo/src/dataset.py` with the file `dataset.py` in this repository. I made changes so the text file can be directly loaded and pre-tokenized. This is not the best (or a very good) way to do this, but it does the job for small datasets well enough.
+
+# Usage
+There are two main steps to fine tune with a custom dataset. First, you need to prepare your dataset so it's in the format the fine tuner is expecting. Second, you need to actually fine tune on the dataset.
+
+The following is an account of how I did this on the LLaMa dataset. You can adapt it to your own dataset as needed.
+
 ## Prepare your data
-I train with a single text file as input. Script convert.py can load JSON file with alpaca-style data and saves *.txt. You can use it, or prepare txt file in other way. The script will make file in following format:
+As written, the fine tuner expects a single text file as input. The script `convert.py` in this repository takes a JSON file with alpaca-style data and converts it to a *.txt file by concatenating together the questions and answers in the following format:
 ```
 user: What are the most important values in life
 bot: The most important values in life are kindness
@@ -15,35 +95,26 @@ user: Write an 1850-word horror story.
 ...
 ```
 User input is generated by appending instruction and input (in random order, since I think that in real settings users sometimes can provide input before instruction), and adds some other minor variations.
-To use script, edit this
+To use the script, edit this
 ```
 input_file = 'alpaca_data_cleaned.json'
 output_txt_file = "alpaca_data_cleaned_for_training.txt"
 ```
-at the beginning of the script
-## Install RWKV and dependencies
-I assume that you have suitable computer with GPU and cuda drivers 11.7 installed. This readme does not cover CUDA driver installation.
-Clone this repository https://github.com/Blealtan/RWKV-LM-LoRA It is good for both LoRa and full fine-tuning
-Install pytorch 1.13.1+cu117 (see here https://pytorch.org/get-started/previous-versions/ for details, I use command belowm but you may want to use different command depending on your OS etc)
-```
-pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
-```
-Install pytorch-lightning (use 1.9.x version, not 2.0! 2.0 does not work), and DeepSpeed=0.7.0 and other accelerate. I install these using pip.
-Replace RWKV-LM-LoRA/RWKV-v4neo/src/dataset.py with dataset.py in this repo. I made changes so text file can be directly loaded and pre-tokenized. This is not the best (or a very good) way to do this, but it does the job for small datasets well enough.
-## Running
+at the beginning of the script. (TODO: If anyone feels like making a pull request for this, it would be nice to make this a command line interface. This is relatively low priority, though.)
 
-go to RWKV-LM-LoRA/RWKV-v4neo/ directory and run train.py
+## Running
+Next, we need to actually fine tune the model. Go to `RWKV-LM-LoRA/RWKV-v4neo/` and run the script `train.py` with the command `python train.py`. There are lots of different arguments you can use for training that are detailed in the given repository.
 
 Example arguments:
 ```
-7B, full fine-tuning, all weights, needs 4 A100 80GB
+7B, full fine tuning, all weights, needs 4 A100 80GB
 
 python3 train.py   --load_model <path_to_initial_check_point>   --proj_dir <path_where_checkpoints_will_be_saved>   --data_file ./alpaca_extended.txt(<your data>)   --data_type utf-8   --vocab_size 50277 --ctx_len 384 --epoch_steps 600 --epoch_count 30 --epoch_begin 0 --epoch_save 1 --micro_bsz 2 --n_layer 32 --n_embd 4096 --pre_ffn 0 --head_qk 0 --lr_init 2e-5 --lr_final 5e-7 --warmup_steps 0 --beta1 0.9 --beta2 0.999 --adam_eps 1e-8 --accelerator gpu --devices 4 --precision bf16 --strategy deepspeed_stage_2 --grad_cp 1
 
 14B (not tested!, I think that need 8 A100 to work)
 python3 train.py   --load_model <path_to_initial_check_point>   --proj_dir <path_where_checkpoints_will_be_saved>   --data_file ./alpaca_extended.txt(<your data>)   --data_type utf-8   --vocab_size 50277 --ctx_len 384 --epoch_steps 600 --epoch_count 30 --epoch_begin 0 --epoch_save 1 --micro_bsz 2 --n_layer 40 --n_embd 5120 --pre_ffn 0 --head_qk 0 --lr_init 2e-5 --lr_final 5e-7 --warmup_steps 0 --beta1 0.9 --beta2 0.999 --adam_eps 1e-8 --accelerator gpu --devices 8 --precision bf16 --strategy deepspeed_stage_2 --grad_cp 1
 ```
-Try longer ctx_len and larger micro_bsz if you have enough combined GPU memory.
+Try a longer ctx_len and larger micro_bsz if you have enough combined GPU memory.
 
 You can try offloading to CPU if you have a lot of RAM - 
 ```
@@ -51,16 +122,12 @@ You can try offloading to CPU if you have a lot of RAM -
 ```
 That will fit into one GPU
 
-For LoRa training, add LoRa arguments, see readme of https://github.com/Blealtan/RWKV-LM-LoRA for an example. With LoRa 14B can be fine-tuned with 1 A100 GPU without offloading to CPU. 
+For LoRA training, add LoRA arguments, see the README of https://github.com/Blealtan/RWKV-LM-LoRA for an example. With LoRa 14B can be fine-tuned with 1 A100 GPU without offloading to CPU. 
 
-### How to choose number of epochs
-Epoch should be one pass through your dataset in theory, but in practice, you will want to save checkpoints and log progress more often. So choose some good number of steps (I use 100 or 500) and do following:
+### How to choose the number of epochs
+An epoch is a single pass through your dataset. In practice, however, you will want to save checkpoints and log progress more often. So choose some good number of steps (I used 100 or 500) and do the following:
 
-After starting, train.py will print number of tokens in your dataset. Divide that by (micro_bsz * ctx_len * epoch_steps) and you  will get number of epochs needed to pass through dataset once. Adjust numbers in this equation as you see fit.
+After starting, `train.py` will print the number of tokens in your dataset. Divide that by (micro_bsz * ctx_len * epoch_steps) and you  will get number of epochs needed to pass through dataset once. Adjust numbers in this equation as you see fit.
 
-
-
-
-
-
-
+# Testing Your New Model
+Okay, so you just fine tuned a RWKV model on a custom dataset! How can you test to see if it works? Probably the easiest way to do this is via [Rwkvstic](https://github.com/harrisonvanderbyl/rwkvstic). Go check out their repository for how to set it up.
